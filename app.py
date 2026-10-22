@@ -1,11 +1,22 @@
+import os
 import streamlit as st
 from core import (
-    init_db, get_student, create_request, get_request,
-    get_requirements, validate_request, list_requests, faq_answer
+    init_db, get_request,
+    list_requests, faq_answer, handle_message,
+    register_student, list_students
 )
 
 st.set_page_config(page_title="UniTramite AI | Atención a Estudiantes", page_icon="🎓", layout="wide")
-init_db()
+
+# En Streamlit Cloud (o .streamlit/secrets.toml) la URL de PostgreSQL llega como secreto
+if st.secrets.load_if_toml_exists() and "DATABASE_URL" in st.secrets:
+    os.environ.setdefault("DATABASE_URL", st.secrets["DATABASE_URL"])
+
+@st.cache_resource
+def setup_database():
+    init_db()
+
+setup_database()
 
 st.title("🎓 Chatbot de Atención a Estudiantes")
 st.caption("UniTramite AI · Prototipo académico con datos simulados")
@@ -17,6 +28,7 @@ with st.sidebar:
         "Conversar con el chatbot",
         "Consultar una solicitud",
         "Panel de solicitudes",
+        "Registro de estudiantes",
         "Preguntas frecuentes",
         "Acerca del prototipo"
     ])
@@ -34,66 +46,13 @@ if section == "Conversar con el chatbot":
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
+    if "chat_state" not in st.session_state:
+        st.session_state.chat_state = {"pending_type": None, "pending_student": None}
 
     prompt = st.chat_input("Escribe tu consulta...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        text = prompt.lower().strip()
-        response = None
-
-        # Seguimiento de tickets
-        import re
-        ticket_match = re.search(r"(UT-\d{6})", prompt.upper())
-        if ticket_match:
-            req = get_request(ticket_match.group(1))
-            if req:
-                response = (
-                    f"**Solicitud {req['ticket']}**\n\n"
-                    f"- Tipo: {req['request_type']}\n"
-                    f"- Estado: **{req['status']}**\n"
-                    f"- Fecha de creación: {req['created_at']}\n"
-                    f"- Observación: {req['notes']}"
-                )
-            else:
-                response = "No encontré ese ticket en la base de datos simulada. Verifica el identificador o solicita ayuda al personal de atención."
-
-        # Identificar intención y matrícula
-        elif any(k in text for k in ["récord", "record", "historial académico"]):
-            st.session_state.pending_type = "Récord académico"
-            response = "Puedo registrar una solicitud de récord académico. Para la demostración, escribe tu matrícula ficticia (ej.: 2024-1001). No compartas datos personales reales."
-        elif any(k in text for k in ["certificación", "certificado", "constancia", "estudio"]):
-            st.session_state.pending_type = "Certificación de estudio"
-            response = "Puedo registrar una solicitud de certificación de estudio. Escribe tu matrícula ficticia (ej.: 2024-1001). No uses datos personales reales."
-        elif any(k in text for k in ["estado", "seguimiento", "ticket", "solicitud"]):
-            response = "Para consultar el estado, envíame el identificador del ticket (formato UT-000001). También puedes usar la sección «Consultar una solicitud»."
-        else:
-            import re
-            student_match = re.search(r"\b\d{4}-\d{4}\b", prompt)
-            if student_match and st.session_state.get("pending_type"):
-                student_id = student_match.group(0)
-                student = get_student(student_id)
-                if not student:
-                    response = "La matrícula no existe en los datos de prueba. Prueba con 2024-1001, 2024-1002 o 2023-2040."
-                else:
-                    request_type = st.session_state.pending_type
-                    checks = validate_request(student, request_type)
-                    missing = [name for name, ok in checks.items() if not ok]
-                    if missing:
-                        ticket = create_request(student_id, request_type, "Pendiente de revisión", "No cumple: " + ", ".join(missing))
-                        response = (
-                            f"Registré la solicitud **{ticket}**, pero queda **Pendiente de revisión**.\n\n"
-                            f"Validaciones que requieren atención: {', '.join(missing)}.\n\n"
-                            "El prototipo no rechaza definitivamente la solicitud ni sustituye la revisión de la oficina académica."
-                        )
-                    else:
-                        ticket = create_request(student_id, request_type, "Recibida", "Validaciones simuladas completadas; pendiente de revisión institucional.")
-                        response = (
-                            f"Las validaciones simuladas se completaron y registré la solicitud **{ticket}** con estado **Recibida**.\n\n"
-                            "Esto no significa que el documento haya sido emitido. La oficina académica debe procesar la solicitud."
-                        )
-                    st.session_state.pending_type = None
-            else:
-                response = faq_answer(prompt)
+        response = handle_message(prompt, st.session_state.chat_state)
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.rerun()
 
@@ -122,6 +81,24 @@ elif section == "Panel de solicitudes":
     else:
         st.info("Todavía no hay solicitudes. Crea una desde el chatbot.")
 
+elif section == "Registro de estudiantes":
+    st.subheader("Registro de estudiantes — datos ficticios")
+    st.caption("Sección pensada para el personal. Usa solo datos inventados: en producción el estado de matrícula y el paz y salvo vendrían de los sistemas de la universidad y esta sección requeriría autenticación.")
+    with st.form("registro_estudiante", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        student_id = col1.text_input("Matrícula", placeholder="2025-0001")
+        full_name = col2.text_input("Nombre completo")
+        matricula_activa = col1.checkbox("Matrícula activa", value=True)
+        paz_y_salvo = col2.checkbox("Paz y salvo al día", value=True)
+        notes = st.text_input("Nota (opcional)")
+        if st.form_submit_button("Registrar estudiante", type="primary"):
+            error = register_student(student_id, full_name, matricula_activa, paz_y_salvo, notes)
+            if error:
+                st.error(error)
+            else:
+                st.success(f"Estudiante {student_id.strip()} registrado. Ya puede solicitar trámites en el chatbot.")
+    st.dataframe(list_students(), use_container_width=True, hide_index=True)
+
 elif section == "Preguntas frecuentes":
     st.subheader("Preguntas frecuentes")
     questions = [
@@ -142,7 +119,7 @@ else:
 - Interfaz web conversacional.
 - Tres flujos: récord académico, certificación y seguimiento de tickets.
 - Reglas deterministas sobre datos ficticios.
-- Registro local de solicitudes SQLite.
+- Registro de estudiantes y solicitudes en SQLite local o PostgreSQL (Supabase).
 - Panel básico de solicitudes.
 
 **No incluido todavía**
