@@ -1,0 +1,32 @@
+# Levanta la app y una base PostgreSQL local con un solo comando:
+#   docker compose up --build
+# Luego abre http://localhost:8501
+# Para usar Supabase en lugar de la base local, pon DATABASE_URL en un archivo .env
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: unitramite
+      POSTGRES_PASSWORD: unitramite
+      POSTGRES_DB: unitramite
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unitramite -d unitramite"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://unitramite:unitramite@db:5432/unitramite}
+    ports:
+      - "8501:8501"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

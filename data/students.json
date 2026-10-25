@@ -1,15 +1,18 @@
 {
   "2024-1001": {
+    "nombre": "Ana Pérez (ficticia)",
     "matricula_activa": true,
     "paz_y_salvo": true,
     "nota": "Caso ficticio apto para validaciones"
   },
   "2024-1002": {
+    "nombre": "Luis Gómez (ficticio)",
     "matricula_activa": true,
     "paz_y_salvo": false,
     "nota": "Caso ficticio con paz y salvo pendiente"
   },
   "2023-2040": {
+    "nombre": "María Rodríguez (ficticia)",
     "matricula_activa": false,
     "paz_y_salvo": true,
     "nota": "Caso ficticio con matrícula inactiva"
