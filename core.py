@@ -4,6 +4,8 @@ from pathlib import Path
 from datetime import datetime
 import json
 import re
+import uuid
+
 
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "unitramite.db"
@@ -59,6 +61,43 @@ def init_db():
             created_at TEXT NOT NULL,
             notes TEXT NOT NULL
         )""")
+
+    run("""
+        CREATE TABLE IF NOT EXISTS ticket_history (
+            id INTEGER PRIMARY KEY,
+            ticket TEXT NOT NULL REFERENCES requests(ticket),
+            previous_status TEXT NOT NULL,
+            new_status TEXT NOT NULL,
+            observation TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""")
+
+
+    run("""
+        CREATE TABLE IF NOT EXISTS requirements (
+            id TEXT PRIMARY KEY,
+            request_type TEXT NOT NULL,
+            requirement_code TEXT NOT NULL,
+            description TEXT NOT NULL,
+            is_mandatory BOOLEAN NOT NULL,
+            UNIQUE (request_type, requirement_code)
+        )
+    """)
+
+    run("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY,
+            ticket TEXT NOT NULL REFERENCES requests(ticket),
+            requirement_code TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            observations TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    seed_requirements()
+    
     if database_url():
         # The sequence hands out ticket numbers atomically across concurrent users
         run("CREATE SEQUENCE IF NOT EXISTS request_number_seq START 2")
@@ -118,6 +157,49 @@ def get_requirements(request_type):
         "Certificación de estudio": ["matricula_activa"]
     }.get(request_type, [])
 
+
+def seed_requirements():
+    catalog = [
+        (
+            "record_matricula",
+            "Récord académico",
+            "matricula_activa",
+            "El estudiante debe tener matrícula activa.",
+            True,
+        ),
+        (
+            "record_paz_y_salvo",
+            "Récord académico",
+            "paz_y_salvo",
+            "El estudiante debe estar a paz y salvo.",
+            True,
+        ),
+        (
+            "cert_matricula",
+            "Certificación de estudio",
+            "matricula_activa",
+            "El estudiante debe tener matrícula activa.",
+            True,
+        ),
+    ]
+
+    for requirement in catalog:
+        run(
+            """
+            INSERT INTO requirements (
+                id,
+                request_type,
+                requirement_code,
+                description,
+                is_mandatory
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (request_type, requirement_code) DO NOTHING
+            """,
+            requirement,
+        )
+
+
 def validate_request(student, request_type):
     """Return named boolean checks; these rules are illustrative, not official policy."""
     requirements = get_requirements(request_type)
@@ -166,6 +248,87 @@ def faq_answer(question):
         return "No. Este prototipo registra solicitudes y demuestra validaciones. No emite documentos oficiales ni tiene conexión con los sistemas universitarios."
     return "Puedo orientarte sobre récords académicos, certificaciones y seguimiento de solicitudes. Si tu caso requiere una decisión administrativa, debe revisarlo el personal autorizado."
 
+def update_request_status(ticket, new_status, observation):
+    """Actualiza el estado y registra el cambio en el historial."""
+
+    ticket = (ticket or "").strip().upper()
+    new_status = (new_status or "").strip()
+    observation = (observation or "").strip()
+
+    allowed_statuses = {
+        "Pendiente",
+        "En proceso",
+        "Completada",
+        "Rechazada",
+    }
+
+    if new_status not in allowed_statuses:
+        return "El estado seleccionado no es válido."
+
+    if not observation:
+        return "Debes escribir una observación para registrar el seguimiento."
+
+    current = get_request(ticket)
+
+    if not current:
+        return "No se encontró la solicitud indicada."
+
+    previous_status = current["status"]
+
+    if previous_status == new_status:
+        return "La solicitud ya tiene ese estado."
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    previous_notes = current.get("notes") or ""
+
+    # Conserva las observaciones anteriores y agrega la nueva.
+    updated_notes = (
+        f"{previous_notes}\n[{now}] {observation}"
+        if previous_notes
+        else f"[{now}] {observation}"
+    )
+
+    # Actualiza el estado y las observaciones actuales.
+    run(
+        """
+        UPDATE requests
+        SET status = ?, notes = ?
+        WHERE ticket = ?
+        """,
+        (new_status, updated_notes, ticket),
+    )
+
+    # Registra el evento para conservar el historial.
+    run(
+        """
+        INSERT INTO ticket_history
+            (ticket, previous_status, new_status, observation, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (ticket, previous_status, new_status, observation, now),
+    )
+
+    return None
+
+
+def get_ticket_history(ticket):
+    """Devuelve el historial de seguimiento de un ticket."""
+
+    return run(
+        """
+        SELECT
+            created_at AS "Fecha",
+            previous_status AS "Estado anterior",
+            new_status AS "Estado nuevo",
+            observation AS "Observación"
+        FROM ticket_history
+        WHERE ticket = ?
+        ORDER BY created_at DESC, id DESC
+        """,
+        (ticket,),
+        fetch="all",
+    )
+
 def validate_ticket_format(ticket):
     return bool(re.fullmatch(r"UT-\d{6}", ticket or ""))
 
@@ -185,6 +348,149 @@ def format_request(req):
         f"- Fecha de creación: {req['created_at']}\n"
         f"- Observación: {req['notes']}"
     )
+
+def register_document(ticket, requirement_code, file_name, observations=""):
+    """Registra los metadatos de un documento asociado a una solicitud."""
+
+    ticket = (ticket or "").strip().upper()
+    requirement_code = (requirement_code or "").strip()
+    file_name = (file_name or "").strip()
+    observations = (observations or "").strip()
+
+    if not ticket:
+        return "Debes indicar el ticket de la solicitud."
+
+    if not requirement_code:
+        return "Debes seleccionar un requisito."
+
+    if not file_name:
+        return "Debes indicar el nombre del documento."
+
+    # Verificar que la solicitud exista.
+    request = get_request(ticket)
+
+    if not request:
+        return "No se encontró la solicitud indicada."
+
+    # Verificar que el requisito corresponda al trámite.
+    requirement = run(
+        """
+        SELECT requirement_code
+        FROM requirements
+        WHERE request_type = ?
+          AND requirement_code = ?
+        """,
+        (request["request_type"], requirement_code),
+        fetch="one",
+    )
+
+    if not requirement:
+        return (
+            "El requisito seleccionado no corresponde "
+            "al tipo de trámite de esta solicitud."
+        )
+
+    document_id = str(uuid.uuid4())
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    run(
+        """
+        INSERT INTO documents (
+            id,
+            ticket,
+            requirement_code,
+            file_name,
+            status,
+            observations,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            document_id,
+            ticket,
+            requirement_code,
+            file_name,
+            "Pendiente",
+            observations,
+            created_at,
+        ),
+    )
+
+    return None
+
+def list_documents(ticket):
+    """Consulta los documentos asociados a una solicitud."""
+
+    ticket = (ticket or "").strip().upper()
+
+    if not ticket:
+        return []
+
+    return run(
+        """
+        SELECT
+            id AS "ID",
+            ticket AS "Ticket",
+            requirement_code AS "Código de requisito",
+            file_name AS "Documento",
+            status AS "Estado",
+            observations AS "Observaciones",
+            created_at AS "Fecha de registro"
+        FROM documents
+        WHERE ticket = ?
+        ORDER BY created_at DESC, id DESC
+        """,
+        (ticket,),
+        fetch="all",
+    )
+
+def update_document_status(document_id, new_status, observations):
+    """Actualiza el estado y las observaciones de un documento."""
+
+    document_id = (document_id or "").strip()
+    new_status = (new_status or "").strip().casefold()
+    observations = (observations or "").strip()
+
+    estados_permitidos = {
+        "pendiente": "Pendiente",
+        "aprobado": "Aprobado",
+        "rechazado": "Rechazado",
+    }
+
+    if not document_id:
+        return "Debes seleccionar un documento."
+
+    if new_status not in estados_permitidos:
+        return (
+            "Estado no válido. Utiliza Pendiente, "
+            "Aprobado o Rechazado."
+        )
+
+    if not observations:
+        return "Debes registrar una observación de revisión."
+
+    document = run(
+        "SELECT id FROM documents WHERE id = ?",
+        (document_id,),
+        fetch="one",
+    )
+
+    if not document:
+        return "No se encontró el documento indicado."
+
+    status = estados_permitidos[new_status]
+
+    run(
+        """
+        UPDATE documents
+        SET status = ?, observations = ?
+        WHERE id = ?
+        """,
+        (status, observations, document_id),
+    )
+
+    return None
 
 def register_request(student_id, request_type):
     """Validate the student and store the request; returns the chatbot reply."""
