@@ -332,13 +332,62 @@ def get_ticket_history(ticket):
 def validate_ticket_format(ticket):
     return bool(re.fullmatch(r"UT-\d{6}", ticket or ""))
 
+
 def detect_request_type(text):
-    t = text.lower()
-    if any(k in t for k in ["récord", "record", "historial académico"]):
+    """Identifica solicitudes académicas mediante reglas y sinónimos."""
+    import re
+    import unicodedata
+
+    if not text or not text.strip():
+        return None
+
+    # Normalizar mayúsculas, acentos y espacios.
+    normalized = unicodedata.normalize("NFKD", text.lower())
+    normalized = "".join(
+        char for char in normalized
+        if not unicodedata.combining(char)
+    )
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+
+    record_patterns = [
+        r"\brecord\b",
+        r"\bhistorial academico\b",
+        r"\bhistorial de notas\b",
+        r"\bcalificaciones de todos los semestres\b",
+        r"\brecord de calificaciones\b",
+        r"\btodas mis notas\b",
+    ]
+
+    certificate_patterns = [
+        r"\bcertificacion\b",
+        r"\bcertificado\b",
+        r"\bconstancia\b",
+        r"\bcarta que confirme que estoy inscrito\b",
+        r"\bcomprobante de matricula activa\b",
+    ]
+
+    record_match = any(
+        re.search(pattern, normalized)
+        for pattern in record_patterns
+    )
+
+    certificate_match = any(
+        re.search(pattern, normalized)
+        for pattern in certificate_patterns
+    )
+
+    # Evitar elegir automáticamente cuando aparecen ambos trámites.
+    if record_match and certificate_match:
+        return None
+
+    if record_match:
         return "Récord académico"
-    if any(k in t for k in ["certificación", "certificacion", "certificado", "constancia", "estudio"]):
+
+    if certificate_match:
         return "Certificación de estudio"
+
     return None
+
 
 def format_request(req):
     return (

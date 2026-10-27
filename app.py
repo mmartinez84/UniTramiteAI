@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 from chat_router import route_message
+from dashboard import show_dashboard
 from core import (
     init_db,
     get_request,
@@ -38,6 +39,7 @@ with st.sidebar:
         "Conversar con el chatbot",
         "Consultar una solicitud",
         "Panel de solicitudes",
+        "Dashboard Analítico",
         "Registro de estudiantes",
         "Gestión de documentos",
         "Preguntas frecuentes",
@@ -329,6 +331,8 @@ elif section == "Panel de solicitudes":
             "Todavía no hay solicitudes registradas. "
             "Crea una desde el chatbot para comenzar."
         )
+elif section == "Dashboard Analítico":
+    show_dashboard()
 
 elif section == "Registro de estudiantes":
     st.subheader("Registro de estudiantes — datos ficticios")
