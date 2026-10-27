@@ -97,7 +97,7 @@ def init_db():
     """)
 
     seed_requirements()
-    
+
     if database_url():
         # The sequence hands out ticket numbers atomically across concurrent users
         run("CREATE SEQUENCE IF NOT EXISTS request_number_seq START 2")
@@ -510,8 +510,29 @@ def register_request(student_id, request_type):
         "Esto no significa que el documento haya sido emitido. La oficina académica debe procesar la solicitud."
     )
 
+def detect_confirmation(prompt):
+    """Identifica respuestas explícitas de confirmación o cancelación."""
+    text = prompt.strip().lower()
+
+    if text in ("confirmar", "confirmo", "sí, confirmar", "si, confirmar"):
+        return "confirm"
+
+    if text in ("cancelar", "cancelo", "no, cancelar"):
+        return "cancel"
+
+    return None
+
 def handle_message(prompt, state):
     """Return the chatbot reply. `state` keeps pending_type/pending_student between turns and is updated in place."""
+        # Permitir cancelar un trámite en cualquier etapa.
+    if detect_confirmation(prompt) == "cancel":
+        if state.get("pending_type") or state.get("pending_student"):
+            state["pending_type"] = None
+            state["pending_student"] = None
+            state["pending_confirmation"] = False
+            return "La solicitud fue cancelada. No se generó ningún ticket."
+
+        return "No tienes ninguna solicitud pendiente para cancelar."
     ticket_match = re.search(r"UT-\d{6}", prompt.upper())
     if ticket_match:
         req = get_request(ticket_match.group(0))
@@ -529,10 +550,36 @@ def handle_message(prompt, state):
             return "La matrícula no está registrada. Regístrala en «Registro de estudiantes» o prueba con 2024-1001, 2024-1002 o 2023-2040."
         state["pending_student"] = student_match.group(0)
 
+
     if state.get("pending_type") and state.get("pending_student"):
-        response = register_request(state["pending_student"], state["pending_type"])
-        state["pending_type"] = state["pending_student"] = None
-        return response
+        decision = detect_confirmation(prompt)
+
+        if decision == "cancel":
+            state["pending_type"] = None
+            state["pending_student"] = None
+            state["pending_confirmation"] = False
+            return "La solicitud fue cancelada. No se generó ningún ticket."
+
+        if decision == "confirm" and state.get("pending_confirmation"):
+            response = register_request(
+                state["pending_student"],
+                state["pending_type"]
+            )
+            state["pending_type"] = None
+            state["pending_student"] = None
+            state["pending_confirmation"] = False
+            return response
+
+        state["pending_confirmation"] = True
+
+        return (
+            "**Confirma los datos de tu solicitud:**\n\n"
+            f"- Trámite: {state['pending_type']}\n"
+            f"- Matrícula: {state['pending_student']}\n\n"
+            "Escribe **confirmar** para registrar la solicitud "
+            "o **cancelar** para descartarla."
+        )
+
     if request_type == "Récord académico":
         return "Puedo registrar una solicitud de récord académico. Para la demostración, escribe tu matrícula ficticia (ej.: 2024-1001). No compartas datos personales reales."
     if request_type == "Certificación de estudio":

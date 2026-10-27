@@ -47,6 +47,46 @@ class TestChatSavesRequests(unittest.TestCase):
         core.init_db()
         self.state = {"pending_type": None, "pending_student": None}
 
+    def test_change_request_type_before_confirmation(self):
+        core.handle_message(
+            "Necesito un récord académico",
+            self.state
+        )
+
+        core.handle_message("2024-1001", self.state)
+
+        self.assertEqual(self.saved(), [])
+
+        reply = core.handle_message(
+            "Quiero cambiar a certificación de estudio",
+            self.state
+        )
+
+        self.assertIn("Certificación de estudio", reply)
+        self.assertEqual(self.saved(), [])
+
+        reply = core.handle_message("confirmar", self.state)
+
+        self.assertIn("UT-", reply)
+        self.assertEqual(len(self.saved()), 1)
+        self.assertEqual(
+            self.saved()[0]["Trámite"],
+            "Certificación de estudio"
+        )
+
+    def test_cancel_before_student_id(self):
+        core.handle_message(
+            "Necesito un récord académico",
+            self.state
+        )
+
+        reply = core.handle_message("cancelar", self.state)
+
+        self.assertIn("cancelada", reply)
+        self.assertEqual(self.saved(), [])
+        self.assertIsNone(self.state["pending_type"])
+        self.assertIsNone(self.state["pending_student"])
+
     def tearDown(self):
         core.DB_PATH = self.original_db
         self.tmp.cleanup()
@@ -59,11 +99,26 @@ class TestChatSavesRequests(unittest.TestCase):
     def test_type_then_student_id(self):
         core.handle_message("Necesito un récord académico", self.state)
         reply = core.handle_message("2024-1001", self.state)
+
+        self.assertIn("confirmar", reply)
+        self.assertEqual(self.saved(), [])
+
+        reply = core.handle_message("confirmar", self.state)
+
         self.assertIn("UT-000002", reply)
         self.assertEqual(self.saved()[0]["Estado"], "Recibida")
 
     def test_type_and_student_id_in_same_message(self):
-        core.handle_message("Necesito un récord académico, mi matrícula es 2024-1002", self.state)
+        reply = core.handle_message(
+            "Necesito un récord académico, mi matrícula es 2024-1002",
+            self.state
+        )
+
+        self.assertIn("confirmar", reply)
+        self.assertEqual(self.saved(), [])
+
+        core.handle_message("confirmar", self.state)
+
         rows = self.saved()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["Matrícula"], "2024-1002")
@@ -71,12 +126,34 @@ class TestChatSavesRequests(unittest.TestCase):
 
     def test_student_id_then_type(self):
         core.handle_message("2024-1001", self.state)
-        core.handle_message("certificación de estudio", self.state)
-        self.assertEqual(self.saved()[0]["Trámite"], "Certificación de estudio")
+        reply = core.handle_message("certificación de estudio", self.state)
+
+        self.assertIn("confirmar", reply)
+        self.assertEqual(self.saved(), [])
+
+        core.handle_message("confirmar", self.state)
+
+        self.assertEqual(
+            self.saved()[0]["Trámite"],
+            "Certificación de estudio"
+        )
 
     def test_student_id_with_status_keyword(self):
-        core.handle_message("Quiero una certificación de estudio", self.state)
-        core.handle_message("mi matrícula es 2024-1001 para la solicitud", self.state)
+        core.handle_message(
+            "Quiero una certificación de estudio",
+            self.state
+        )
+
+        reply = core.handle_message(
+            "mi matrícula es 2024-1001 para la solicitud",
+            self.state
+        )
+
+        self.assertIn("confirmar", reply)
+        self.assertEqual(self.saved(), [])
+
+        core.handle_message("confirmar", self.state)
+
         self.assertEqual(len(self.saved()), 1)
 
     def test_unknown_student_is_not_saved(self):
@@ -85,8 +162,25 @@ class TestChatSavesRequests(unittest.TestCase):
         self.assertEqual(self.saved(), [])
 
     def test_registered_student_can_request(self):
-        self.assertIsNone(core.register_student("2025-0001", "Prueba Nueva", True, False))
-        core.handle_message("récord académico 2025-0001", self.state)
+        self.assertIsNone(
+            core.register_student(
+                "2025-0001",
+                "Prueba Nueva",
+                True,
+                False
+            )
+        )
+
+        reply = core.handle_message(
+            "récord académico 2025-0001",
+            self.state
+        )
+
+        self.assertIn("confirmar", reply)
+        self.assertEqual(self.saved(), [])
+
+        core.handle_message("confirmar", self.state)
+
         rows = self.saved()
         self.assertEqual(rows[0]["Matrícula"], "2025-0001")
         self.assertEqual(rows[0]["Estado"], "Pendiente de revisión")
@@ -96,6 +190,50 @@ class TestChatSavesRequests(unittest.TestCase):
         self.assertIn("obligatorio", core.register_student("2025-0002", " ", True, True))
         self.assertIn("ya está registrada", core.register_student("2024-1001", "Otra", True, True))
         self.assertEqual(len(core.list_students()), 3)
+
+
+    def test_cancel_request(self):
+        core.handle_message(
+            "Necesito un récord académico",
+            self.state
+        )
+
+        core.handle_message("2024-1001", self.state)
+
+        reply = core.handle_message("cancelar", self.state)
+
+        self.assertIn("cancelada", reply)
+        self.assertEqual(self.saved(), [])
+        self.assertIsNone(self.state["pending_type"])
+        self.assertIsNone(self.state["pending_student"])
+        self.assertFalse(self.state["pending_confirmation"])
+
+    def test_confirmation_required(self):
+        reply = core.handle_message(
+            "récord académico 2024-1001",
+            self.state
+        )
+
+        self.assertIn("confirmar", reply)
+        self.assertEqual(self.saved(), [])
+
+        core.handle_message("confirmar", self.state)
+
+        self.assertEqual(len(self.saved()), 1)
+
+    def test_unrelated_message_does_not_register_request(self):
+        core.handle_message(
+            "récord académico 2024-1001",
+            self.state
+        )
+
+        reply = core.handle_message(
+            "Tengo otra pregunta",
+            self.state
+        )
+
+        self.assertEqual(self.saved(), [])
+        self.assertIn("confirmar", reply)
 
     def test_ticket_lookup(self):
         self.assertIn("UT-000001", core.handle_message("estado de UT-000001", self.state))

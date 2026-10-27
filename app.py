@@ -1,5 +1,6 @@
 import os
 import streamlit as st
+from chat_router import route_message
 from core import (
     init_db,
     get_request,
@@ -62,7 +63,7 @@ if section == "Conversar con el chatbot":
     prompt = st.chat_input("Escribe tu consulta...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        response = handle_message(prompt, st.session_state.chat_state)
+        response = route_message(prompt, st.session_state.chat_state)
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.rerun()
 
