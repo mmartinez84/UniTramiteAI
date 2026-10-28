@@ -6,22 +6,86 @@ SIMULATIONS = 10000
 SEED = 42
 
 
-def run_simulation(n=SIMULATIONS, seed=SEED):
-    if n <= 0:
+
+def run_simulation(
+    n=SIMULATIONS,
+    seed=SEED,
+    requests_min=400,
+    requests_max=600,
+    manual_minutes_min=8,
+    manual_minutes_max=15,
+    automated_minutes_min=2,
+    automated_minutes_max=5,
+    automation_rate_min=0.50,
+    automation_rate_max=0.80,
+    hourly_cost=300,
+    monthly_operating_cost=5000,
+    initial_investment=40000,
+):
+    """Simula el impacto económico de automatizar solicitudes."""
+
+    if not isinstance(n, int) or n <= 0:
         raise ValueError("El número de simulaciones debe ser positivo.")
+
+    ranges = [
+        ("solicitudes", requests_min, requests_max),
+        ("tiempo manual", manual_minutes_min, manual_minutes_max),
+        ("tiempo automatizado", automated_minutes_min, automated_minutes_max),
+        ("automatización", automation_rate_min, automation_rate_max),
+    ]
+
+    for name, minimum, maximum in ranges:
+        if minimum < 0 or maximum < minimum:
+            raise ValueError(f"Rango inválido para {name}.")
+
+    if not all(
+        isinstance(value, int)
+        for value in (requests_min, requests_max)
+    ):
+        raise ValueError("Las solicitudes deben ser números enteros.")
+
+    if not 0 <= automation_rate_min <= automation_rate_max <= 1:
+        raise ValueError("La tasa de automatización debe estar entre 0 y 1.")
+
+    if any(
+        cost < 0
+        for cost in (
+            hourly_cost,
+            monthly_operating_cost,
+            initial_investment,
+        )
+    ):
+        raise ValueError("Los costos no pueden ser negativos.")
+
+    annual_cost = (
+        initial_investment + monthly_operating_cost * 12
+    )
+
+    if annual_cost <= 0:
+        raise ValueError(
+            "El costo anual debe ser mayor que cero para calcular el ROI."
+        )
 
     rng = random.Random(seed)
     results = []
 
     for _ in range(n):
-        requests = rng.randint(400, 600)
-        manual_minutes = rng.uniform(8, 15)
-        automated_minutes = rng.uniform(2, 5)
-        automation_rate = rng.uniform(0.50, 0.80)
+        requests = rng.randint(requests_min, requests_max)
 
-        hourly_cost = 300
-        monthly_operating_cost = 5000
-        initial_investment = 40000
+        manual_minutes = rng.uniform(
+            manual_minutes_min,
+            manual_minutes_max,
+        )
+
+        automated_minutes = rng.uniform(
+            automated_minutes_min,
+            automated_minutes_max,
+        )
+
+        automation_rate = rng.uniform(
+            automation_rate_min,
+            automation_rate_max,
+        )
 
         automated_requests = requests * automation_rate
 
@@ -32,24 +96,18 @@ def run_simulation(n=SIMULATIONS, seed=SEED):
         )
 
         monthly_gross_savings = hours_saved * hourly_cost
+
         monthly_net_savings = (
             monthly_gross_savings - monthly_operating_cost
         )
 
-        annual_net_benefit = (
-            monthly_net_savings * 12 - initial_investment
-        )
-
-        annual_cost = (
-            initial_investment + monthly_operating_cost * 12
-        )
-
         annual_gross_benefit = monthly_gross_savings * 12
 
-        roi = (
-            (annual_gross_benefit - annual_cost)
-            / annual_cost * 100
+        annual_net_benefit = (
+            annual_gross_benefit - annual_cost
         )
+
+        roi = annual_net_benefit / annual_cost * 100
 
         results.append({
             "solicitudes": requests,

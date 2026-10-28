@@ -177,63 +177,214 @@ def show_dashboard():
             hide_index=True,
         )
 
+       
     with tab3:
-        st.subheader("Análisis de sensibilidad")
+        st.subheader("Simulación interactiva de escenarios")
 
         st.write(
-            "Modifica los parámetros para estimar "
-            "el impacto operativo bajo distintos escenarios."
+            "Modifica los parámetros para recalcular "
+            "la simulación Monte Carlo."
         )
-
-        requests = st.slider(
-            "Solicitudes mensuales",
-            100, 2000, 500, step=50
-        )
-
-        manual_time = st.slider(
-            "Tiempo manual (minutos)",
-            5, 30, 12
-        )
-
-        automated_time = st.slider(
-            "Tiempo automatizado (minutos)",
-            1, 15, 3
-        )
-
-        automation_rate = st.slider(
-            "Tasa de automatización (%)",
-            10, 100, 65
-        )
-
-        hourly_cost = st.number_input(
-            "Costo administrativo por hora (RD$)",
-            min_value=0.0,
-            value=300.0,
-            step=50.0,
-        )
-
-        hours_saved = (
-            requests
-            * automation_rate / 100
-            * max(0, manual_time - automated_time)
-            / 60
-        )
-
-        monthly_savings = hours_saved * hourly_cost
 
         col1, col2 = st.columns(2)
 
-        col1.metric(
-            "Horas liberadas al mes",
-            f"{hours_saved:.2f}"
-        )
-        col2.metric(
-            "Valor mensual del tiempo liberado",
-            f"RD${monthly_savings:,.2f}"
-        )
+        with col1:
+            requests = st.slider(
+                "Solicitudes mensuales promedio",
+                min_value=100,
+                max_value=2000,
+                value=500,
+                step=50,
+            )
 
-        st.caption(
-            "Este análisis es determinista. "
-            "La simulación Monte Carlo incorpora incertidumbre "
-            "en los parámetros."
-        )
+            automation_rate = st.slider(
+                "Automatización promedio (%)",
+                min_value=10,
+                max_value=100,
+                value=65,
+            )
+
+            manual_time = st.slider(
+                "Tiempo manual promedio (minutos)",
+                min_value=5,
+                max_value=30,
+                value=12,
+            )
+
+            automated_time = st.slider(
+                "Tiempo automatizado promedio (minutos)",
+                min_value=1,
+                max_value=15,
+                value=3,
+            )
+
+        with col2:
+            hourly_cost = st.number_input(
+                "Costo administrativo por hora (RD$)",
+                min_value=0.0,
+                value=300.0,
+                step=50.0,
+            )
+
+            operating_cost = st.number_input(
+                "Costo operativo mensual (RD$)",
+                min_value=0.0,
+                value=5000.0,
+                step=500.0,
+            )
+
+            investment = st.number_input(
+                "Inversión inicial (RD$)",
+                min_value=0.0,
+                value=40000.0,
+                step=5000.0,
+            )
+
+            simulations = st.selectbox(
+                "Número de simulaciones",
+                [1000, 5000, 10000, 20000],
+                index=2,
+            )
+
+        st.divider()
+
+        # Variación de +/- 20 % alrededor del promedio.
+        requests_min = max(0, int(requests * 0.8))
+        requests_max = int(requests * 1.2)
+
+        # Variación de +/- 20 % en los tiempos.
+        manual_min = manual_time * 0.8
+        manual_max = manual_time * 1.2
+
+        automated_min = automated_time * 0.8
+        automated_max = automated_time * 1.2
+
+        # Variación de +/- 15 puntos porcentuales.
+        rate_min = max(0, (automation_rate - 15) / 100)
+        rate_max = min(1, (automation_rate + 15) / 100)
+
+        if investment + operating_cost * 12 <= 0:
+            st.warning(
+                "Introduce una inversión o costo operativo "
+                "mayor que cero para calcular el ROI."
+            )
+        else:
+            results_interactive = run_simulation(
+                n=simulations,
+                requests_min=requests_min,
+                requests_max=requests_max,
+                manual_minutes_min=manual_min,
+                manual_minutes_max=manual_max,
+                automated_minutes_min=automated_min,
+                automated_minutes_max=automated_max,
+                automation_rate_min=rate_min,
+                automation_rate_max=rate_max,
+                hourly_cost=hourly_cost,
+                monthly_operating_cost=operating_cost,
+                initial_investment=investment,
+            )
+
+            summary_interactive = summarize(
+                results_interactive
+            )
+
+            df_interactive = pd.DataFrame(
+                results_interactive
+            )
+
+            st.markdown("### Indicadores del escenario")
+
+            k1, k2, k3 = st.columns(3)
+
+            k1.metric(
+                "Horas liberadas / mes",
+                f"{summary_interactive['horas_ahorradas']['media']:.2f}",
+            )
+
+            k2.metric(
+                "Ahorro bruto / mes",
+                "RD${:,.2f}".format(
+                    summary_interactive[
+                        "ahorro_bruto_mensual"
+                    ]["media"]
+                ),
+            )
+
+            k3.metric(
+                "ROI anual medio",
+                "{:.2f}%".format(
+                    summary_interactive["roi_anual"]["media"]
+                ),
+            )
+
+            st.metric(
+                "Probabilidad simulada de ROI positivo",
+                "{:.2%}".format(
+                    summary_interactive[
+                        "probabilidad_roi_positivo"
+                    ]
+                ),
+            )
+
+            st.markdown("### Distribución del ROI anual")
+
+            import altair as alt
+
+            roi_chart = (
+                alt.Chart(df_interactive)
+                .mark_bar()
+                .encode(
+                    x=alt.X(
+                        "roi_anual:Q",
+                        bin=alt.Bin(maxbins=30),
+                        title="ROI anual (%)",
+                    ),
+                    y=alt.Y(
+                        "count():Q",
+                        title="Frecuencia",
+                    ),
+                    tooltip=[
+                        alt.Tooltip(
+                            "count():Q",
+                            title="Escenarios",
+                        )
+                    ],
+                )
+                .properties(height=300)
+            )
+
+            st.altair_chart(
+                roi_chart,
+                use_container_width=True,
+            )
+
+            st.markdown("### Intervalos de incertidumbre")
+
+            rows = []
+
+            for indicator, values in summary_interactive.items():
+                if indicator == "probabilidad_roi_positivo":
+                    continue
+
+                rows.append({
+                    "Indicador": indicator,
+                    "P5": round(values["p5"], 2),
+                    "Mediana": round(values["p50"], 2),
+                    "Media": round(values["media"], 2),
+                    "P95": round(values["p95"], 2),
+                })
+
+            st.dataframe(
+                pd.DataFrame(rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.caption(
+                "Resultados simulados con variaciones uniformes "
+                "de +/-20 % en solicitudes y tiempos, y +/-15 "
+                "puntos porcentuales en automatización, "
+                "limitada al rango de 0 % a 100 %. "
+                "No representan datos reales de una universidad."
+            )
+ 
