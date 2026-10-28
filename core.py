@@ -2,6 +2,7 @@ import os
 import sqlite3
 from pathlib import Path
 from datetime import datetime
+from security import can_view_request, can_manage_requests, can_manage_students, can_manage_documents
 import json
 import re
 import uuid
@@ -109,22 +110,70 @@ def init_db():
     if run("SELECT COUNT(*) AS n FROM students", fetch="one")["n"] == 0:
         with open(SEED_PATH, encoding="utf-8") as f:
             for student_id, s in json.load(f).items():
-                register_student(student_id, s["nombre"], s["matricula_activa"], s["paz_y_salvo"], s["nota"])
+                _insert_student(student_id, s["nombre"], s["matricula_activa"], s["paz_y_salvo"], s["nota"])
     if run("SELECT COUNT(*) AS n FROM requests", fetch="one")["n"] == 0:
         run("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?)", SEED_REQUEST)
 
 def validate_student_id_format(student_id):
     return bool(re.fullmatch(r"\d{4}-\d{4}", student_id or ""))
 
-def get_student(student_id):
-    row = run("SELECT * FROM students WHERE student_id = ?", (student_id,), fetch="one")
+def _get_student(student_id):
+    """Consulta interna de datos estudiantiles."""
+    row = run(
+        "SELECT * FROM students WHERE student_id = ?",
+        (student_id,),
+        fetch="one",
+    )
+
     if row:
-        # SQLite returns booleans as 0/1
         row["matricula_activa"] = bool(row["matricula_activa"])
         row["paz_y_salvo"] = bool(row["paz_y_salvo"])
+
     return row
 
-def register_student(student_id, full_name, matricula_activa, paz_y_salvo, notes=""):
+
+def get_student(student_id, *, identity=None):
+    """Consulta datos estudiantiles únicamente con autorización."""
+
+    if identity is None:
+        return None
+
+    if identity.role != "admin":
+        if (
+            identity.role != "student"
+            or identity.student_id != student_id
+        ):
+            return None
+
+    return _get_student(student_id)
+
+def demo_student_exists(student_id):
+    """Verifica una matrícula ficticia en modo demostración.
+
+    No devuelve datos personales ni concede permisos.
+    """
+    import os
+
+    if os.getenv("UNITRAMITE_DEMO_MODE", "false").lower() != "true":
+        return False
+
+    if not isinstance(student_id, str):
+        return False
+
+    import re
+
+    if not re.fullmatch(r"\d{4}-\d{4}", student_id):
+        return False
+
+    row = run(
+        "SELECT 1 FROM students WHERE student_id = ?",
+        (student_id,),
+        fetch="one",
+    )
+
+    return row is not None
+
+def _insert_student(student_id, full_name, matricula_activa, paz_y_salvo, notes=""):
     """Store a new student; returns an error message, or None when it was saved."""
     student_id = (student_id or "").strip()
     full_name = (full_name or "").strip()
@@ -132,24 +181,59 @@ def register_student(student_id, full_name, matricula_activa, paz_y_salvo, notes
         return "La matrícula debe tener el formato 0000-0000."
     if not full_name:
         return "El nombre es obligatorio."
-    if get_student(student_id):
+    if _get_student(student_id):
         return f"La matrícula {student_id} ya está registrada."
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     run("INSERT INTO students VALUES (?, ?, ?, ?, ?, ?)",
         (student_id, full_name, bool(matricula_activa), bool(paz_y_salvo), notes.strip(), now))
     return None
 
-def list_students():
+
+def register_student(
+    student_id,
+    full_name,
+    matricula_activa,
+    paz_y_salvo,
+    notes="",
+    *,
+    identity=None,
+):
+    """Registra estudiantes únicamente con autorización administrativa."""
+
+    if not can_manage_students(identity):
+        return (
+            "Acceso denegado. Solo el personal administrativo "
+            "autorizado puede registrar estudiantes."
+        )
+
+    return _insert_student(
+        student_id,
+        full_name,
+        matricula_activa,
+        paz_y_salvo,
+        notes,
+    )
+
+
+def list_students(*, identity=None):
+    """Lista estudiantes únicamente para administradores autorizados."""
+
+    if not can_manage_students(identity):
+        return []
+
     rows = run("""
         SELECT student_id AS "Matrícula", full_name AS "Nombre",
                matricula_activa AS "Matrícula activa", paz_y_salvo AS "Paz y salvo",
                notes AS "Nota", created_at AS "Registrado"
         FROM students ORDER BY student_id
     """, fetch="all")
+
     for r in rows:
         r["Matrícula activa"] = bool(r["Matrícula activa"])
         r["Paz y salvo"] = bool(r["Paz y salvo"])
+
     return rows
+
 
 def get_requirements(request_type):
     return {
@@ -209,7 +293,23 @@ def validate_request(student, request_type):
     }
     return {labels[r]: bool(student.get(r, False)) for r in requirements}
 
-def create_request(student_id, request_type, status, notes):
+def create_request(student_id, request_type, status, notes, *, identity=None):
+
+    if identity is None:
+        raise PermissionError(
+            "Acceso denegado. Se requiere una identidad verificada."
+        )
+
+    if identity.role != "admin":
+        if (
+            identity.role != "student"
+            or identity.student_id != student_id
+        ):
+            raise PermissionError(
+                "Acceso denegado. No puedes registrar "
+                "solicitudes para otra matrícula."
+            )
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     if database_url():
         row = run(
@@ -223,33 +323,171 @@ def create_request(student_id, request_type, status, notes):
     run("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?)", (ticket, student_id, request_type, status, now, notes))
     return ticket
 
-def get_request(ticket):
-    return run("SELECT * FROM requests WHERE ticket = ?", (ticket,), fetch="one")
+def _get_request(ticket):
+    """Consulta interna de solicitudes."""
+    return run(
+        "SELECT * FROM requests WHERE ticket = ?",
+        (ticket,),
+        fetch="one",
+    )
 
-def list_requests():
-    return run("""
+
+def get_request(ticket, *, identity=None):
+    """Consulta una solicitud únicamente si existe autorización."""
+    request = _get_request(ticket)
+
+    if request is None:
+        return None
+
+    if not can_view_request(identity, request):
+        return None
+
+    return request
+
+def list_requests(*, identity=None):
+    """Lista solicitudes únicamente para administradores autorizados."""
+    if not can_manage_requests(identity):
+        return []
+
+    rows = run("""
         SELECT ticket AS "Ticket", student_id AS "Matrícula",
                request_type AS "Trámite", status AS "Estado",
                created_at AS "Fecha", notes AS "Observación"
         FROM requests ORDER BY created_at DESC, ticket DESC
     """, fetch="all")
+    return rows
 
 def faq_answer(question):
-    q = question.lower()
-    if any(k in q for k in ["récord", "record", "historial académico"]):
-        return "Puedes solicitar un récord académico desde el chatbot. El prototipo verifica matrícula activa y paz y salvo con datos ficticios y registra un ticket. Los requisitos reales deben confirmarse con la universidad."
-    if any(k in q for k in ["certificación", "certificado", "constancia"]):
-        return "Puedes solicitar una certificación de estudio. En esta demostración se verifica la matrícula activa. La emisión oficial corresponde al área académica."
-    if any(k in q for k in ["estado", "seguimiento", "ticket", "solicitud"]):
-        return "Para consultar una solicitud, introduce su identificador, por ejemplo UT-000001, en la sección de seguimiento."
-    if "paz y salvo" in q:
-        return "Si tu paz y salvo aparece pendiente, el chatbot registra el caso para revisión. No puede modificar estados financieros ni conceder excepciones."
-    if any(k in q for k in ["emite", "documento oficial", "oficial"]):
-        return "No. Este prototipo registra solicitudes y demuestra validaciones. No emite documentos oficiales ni tiene conexión con los sistemas universitarios."
-    return "Puedo orientarte sobre récords académicos, certificaciones y seguimiento de solicitudes. Si tu caso requiere una decisión administrativa, debe revisarlo el personal autorizado."
+    """Responde preguntas frecuentes sin depender de la IA."""
+    import unicodedata
 
-def update_request_status(ticket, new_status, observation):
+    def normalize(text):
+        text = unicodedata.normalize("NFKD", text.lower().strip())
+        return "".join(
+            char for char in text
+            if not unicodedata.combining(char)
+        )
+
+    q = normalize(question)
+    words = set(q.replace("¿", " ").replace("?", " ").split())
+
+    # Saludos
+    if words.intersection({"hola", "buenos", "buenas", "saludos"}):
+        return (
+            "¡Hola! Soy UniTramite AI, tu asistente virtual "
+            "de atención estudiantil. Puedo orientarte sobre "
+            "récords académicos, certificaciones de estudio, "
+            "requisitos y seguimiento de solicitudes. "
+            "¿En qué puedo ayudarte?"
+        )
+
+    # Trámites disponibles
+    if (
+        "tramites" in q
+        or "servicios" in q
+        or "que puedo realizar" in q
+        or "que puedo hacer" in q
+    ):
+        return (
+            "En UniTramite AI puedes recibir orientación sobre:\n\n"
+            "1. Solicitud de récord académico.\n"
+            "2. Certificación de estudio.\n"
+            "3. Consulta y seguimiento de solicitudes.\n\n"
+            "Este es un prototipo académico con datos ficticios. "
+            "El registro y la consulta de solicitudes personales "
+            "requieren autenticación, que todavía no está "
+            "implementada en esta versión."
+        )
+
+    # Récord académico
+    if any(
+        term in q
+        for term in ("record", "historial academico")
+    ):
+        return (
+            "Para solicitar un récord académico, el prototipo "
+            "contempla dos requisitos:\n\n"
+            "1. Tener la matrícula activa.\n"
+            "2. Estar a paz y salvo.\n\n"
+            "UniTramite AI puede orientar sobre el trámite, "
+            "pero el registro de solicitudes requiere una "
+            "identidad autenticada. Actualmente esa función "
+            "no está disponible para usuarios públicos.\n\n"
+            "Los requisitos oficiales deben confirmarse "
+            "directamente con la universidad."
+        )
+
+    # Certificaciones
+    if any(
+        term in q
+        for term in (
+            "certificacion",
+            "certificado",
+            "constancia",
+        )
+    ):
+        return (
+            "Para solicitar una certificación de estudio, "
+            "el prototipo verifica que la matrícula esté activa.\n\n"
+            "El estudiante puede recibir orientación mediante "
+            "el chatbot, pero el registro de la solicitud "
+            "requiere autenticación, todavía no disponible "
+            "en esta versión.\n\n"
+            "La emisión de documentos oficiales corresponde "
+            "a la universidad."
+        )
+
+    # Paz y salvo
+    if "paz y salvo" in q:
+        return (
+            "El paz y salvo es uno de los requisitos que "
+            "el prototipo verifica para solicitar un récord "
+            "académico. Si aparece pendiente, el caso debe "
+            "revisarse con el personal administrativo. "
+            "El chatbot no puede modificar estados financieros."
+        )
+
+    # Documentos oficiales
+    if any(
+        term in q
+        for term in ("documento oficial", "emite", "oficial")
+    ):
+        return (
+            "UniTramite AI es un prototipo académico. "
+            "No emite documentos oficiales ni está conectado "
+            "con los sistemas reales de la universidad."
+        )
+
+    # Seguimiento de solicitudes
+    if any(
+        term in q
+        for term in ("estado", "seguimiento", "ticket", "solicitud")
+    ):
+        return (
+            "UniTramite AI permite demostrar el seguimiento "
+            "de solicitudes mediante tickets como UT-000001. "
+            "Por privacidad, la consulta de información "
+            "personal requiere autenticación, que todavía "
+            "no está implementada en la interfaz pública."
+        )
+
+    # Respuesta de respaldo
+    return (
+        "Puedo orientarte sobre récords académicos, "
+        "certificaciones de estudio, requisitos y seguimiento "
+        "de solicitudes. ¿Sobre cuál de estos temas "
+        "necesitas información?"
+    )
+
+def update_request_status(ticket, new_status, observation, *, identity=None):
     """Actualiza el estado y registra el cambio en el historial."""
+
+     # Verificar permisos antes de modificar la solicitud
+    if not can_manage_requests(identity):
+        return (
+            "Acceso denegado. Solo el personal administrativo "
+            "autorizado puede actualizar solicitudes."
+        )
 
     ticket = (ticket or "").strip().upper()
     new_status = (new_status or "").strip()
@@ -268,7 +506,7 @@ def update_request_status(ticket, new_status, observation):
     if not observation:
         return "Debes escribir una observación para registrar el seguimiento."
 
-    current = get_request(ticket)
+    current = _get_request(ticket)
 
     if not current:
         return "No se encontró la solicitud indicada."
@@ -311,8 +549,21 @@ def update_request_status(ticket, new_status, observation):
     return None
 
 
-def get_ticket_history(ticket):
-    """Devuelve el historial de seguimiento de un ticket."""
+def get_ticket_history(ticket, *, identity=None):
+    """Consulta el historial únicamente con autorización."""
+
+    ticket = (ticket or "").strip().upper()
+
+    if not ticket or identity is None:
+        return []
+
+    request = get_request(
+    ticket,
+    identity=identity,
+    )
+
+    if not request:
+        return []
 
     return run(
         """
@@ -398,8 +649,23 @@ def format_request(req):
         f"- Observación: {req['notes']}"
     )
 
-def register_document(ticket, requirement_code, file_name, observations=""):
-    """Registra los metadatos de un documento asociado a una solicitud."""
+
+def register_document(
+    ticket,
+    requirement_code,
+    file_name,
+    observations="",
+    *,
+    identity=None,
+):
+    """Registra documentos únicamente con autorización administrativa."""
+
+    if not can_manage_documents(identity):
+        return (
+            "Acceso denegado. Solo el personal administrativo "
+            "autorizado puede registrar documentos."
+        )
+
 
     ticket = (ticket or "").strip().upper()
     requirement_code = (requirement_code or "").strip()
@@ -416,7 +682,7 @@ def register_document(ticket, requirement_code, file_name, observations=""):
         return "Debes indicar el nombre del documento."
 
     # Verificar que la solicitud exista.
-    request = get_request(ticket)
+    request = get_request(ticket, identity=identity)
 
     if not request:
         return "No se encontró la solicitud indicada."
@@ -468,13 +734,22 @@ def register_document(ticket, requirement_code, file_name, observations=""):
 
     return None
 
-def list_documents(ticket):
+def list_documents(ticket, *, identity=None):
     """Consulta los documentos asociados a una solicitud."""
 
     ticket = (ticket or "").strip().upper()
 
     if not ticket:
         return []
+
+    if identity is None:
+        return []
+
+    request = get_request(ticket, identity=identity)
+
+    if not request:
+        return []
+
 
     return run(
         """
@@ -494,8 +769,22 @@ def list_documents(ticket):
         fetch="all",
     )
 
-def update_document_status(document_id, new_status, observations):
-    """Actualiza el estado y las observaciones de un documento."""
+
+def update_document_status(
+    document_id,
+    new_status,
+    observations,
+    *,
+    identity=None,
+):
+    """Actualiza documentos únicamente con autorización administrativa."""
+
+    if not can_manage_documents(identity):
+        return (
+            "Acceso denegado. Solo el personal administrativo "
+            "autorizado puede actualizar documentos."
+        )
+
 
     document_id = (document_id or "").strip()
     new_status = (new_status or "").strip().casefold()
@@ -541,19 +830,52 @@ def update_document_status(document_id, new_status, observations):
 
     return None
 
-def register_request(student_id, request_type):
+def register_request(student_id, request_type, *, identity=None):
     """Validate the student and store the request; returns the chatbot reply."""
-    student = get_student(student_id)
+
+    if identity is None:
+        return (
+            "Acceso denegado. Debes iniciar sesión "
+            "con una identidad verificada para registrar solicitudes."
+        )
+
+    if identity.role != "admin":
+        if (
+            identity.role != "student"
+            or identity.student_id != student_id
+        ):
+            return (
+                "Acceso denegado. No puedes registrar "
+                "solicitudes para otra matrícula."
+            )
+
+    student = get_student(student_id, identity=identity)
     checks = validate_request(student, request_type)
     missing = [name for name, ok in checks.items() if not ok]
     if missing:
-        ticket = create_request(student_id, request_type, "Pendiente de revisión", "No cumple: " + ", ".join(missing))
+
+        ticket = create_request(
+            student_id,
+            request_type,
+            "Pendiente de revisión",
+            "No cumple: " + ", ".join(missing),
+            identity=identity,
+        )
+
         return (
             f"Registré la solicitud **{ticket}**, pero queda **Pendiente de revisión**.\n\n"
             f"Validaciones que requieren atención: {', '.join(missing)}.\n\n"
             "El prototipo no rechaza definitivamente la solicitud ni sustituye la revisión de la oficina académica."
         )
-    ticket = create_request(student_id, request_type, "Recibida", "Validaciones simuladas completadas; pendiente de revisión institucional.")
+
+    ticket = create_request(
+        student_id,
+        request_type,
+        "Recibida",
+        "Validaciones simuladas completadas; pendiente de revisión institucional.",
+        identity=identity,
+    )
+
     return (
         f"Las validaciones simuladas se completaron y registré la solicitud **{ticket}** con estado **Recibida**.\n\n"
         "Esto no significa que el documento haya sido emitido. La oficina académica debe procesar la solicitud."
@@ -582,22 +904,78 @@ def handle_message(prompt, state):
             return "La solicitud fue cancelada. No se generó ningún ticket."
 
         return "No tienes ninguna solicitud pendiente para cancelar."
+
     ticket_match = re.search(r"UT-\d{6}", prompt.upper())
+
     if ticket_match:
-        req = get_request(ticket_match.group(0))
-        if req:
-            return format_request(req)
-        return "No encontré ese ticket en la base de datos simulada. Verifica el identificador o solicita ayuda al personal de atención."
+        # La identidad debe provenir de una sesión autenticada
+        # por un mecanismo confiable, nunca del texto del chat.
+        identity = state.get("authenticated_identity")
+
+        if identity is None:
+            return (
+                "Para consultar información de una solicitud "
+                "debes iniciar sesión con una identidad verificada. "
+                "Este prototipo todavía no dispone de "
+                "autenticación real."
+            )
+
+        req = get_request(
+            ticket_match.group(0),
+            identity=identity,
+        )
+        if not req:
+            return (
+                "No se puede mostrar la solicitud indicada. "
+                "Verifica tus permisos o contacta al "
+                "personal autorizado."
+            )
+
+
+        return format_request(req)
+
 
     request_type = detect_request_type(prompt)
     if request_type:
         state["pending_type"] = request_type
     student_match = re.search(r"\b\d{4}-\d{4}\b", prompt)
+
     if student_match:
-        if not get_student(student_match.group(0)):
+        student_id = student_match.group(0)
+        identity = state.get("authenticated_identity")
+
+        if identity is None:
             state["pending_student"] = None
-            return "La matrícula no está registrada. Regístrala en «Registro de estudiantes» o prueba con 2024-1001, 2024-1002 o 2023-2040."
-        state["pending_student"] = student_match.group(0)
+            state["pending_confirmation"] = False
+            return (
+                "Para utilizar una matrícula debes iniciar sesión "
+                "con una identidad verificada. "
+                "Este prototipo todavía no dispone de autenticación real."
+            )
+
+        if (
+            identity.role != "admin"
+            and (
+                identity.role != "student"
+                or identity.student_id != student_id
+            )
+        ):
+            state["pending_student"] = None
+            state["pending_confirmation"] = False
+            return (
+                "Acceso denegado. No puedes utilizar "
+                "una matrícula diferente a la autorizada."
+            )
+
+        if not get_student(student_id, identity=identity):
+            state["pending_student"] = None
+            state["pending_confirmation"] = False
+            return (
+                "No se encontró la matrícula indicada. "
+                "Contacta al personal administrativo."
+            )
+
+        state["pending_student"] = student_id
 
 
     if state.get("pending_type") and state.get("pending_student"):
@@ -609,11 +987,38 @@ def handle_message(prompt, state):
             state["pending_confirmation"] = False
             return "La solicitud fue cancelada. No se generó ningún ticket."
 
+
         if decision == "confirm" and state.get("pending_confirmation"):
+            # La identidad debe provenir de una autenticación real,
+            # nunca de la matrícula escrita en el chatbot.
+            identity = state.get("authenticated_identity")
+
+            if identity is None:
+                return (
+                    "Para registrar una solicitud necesitas "
+                    "autenticación con una identidad verificada. "
+                    "Este prototipo todavía no dispone de "
+                    "autenticación real."
+                )
+
+            if (
+                identity.role != "admin"
+                and (
+                    identity.role != "student"
+                    or identity.student_id != state["pending_student"]
+                )
+            ):
+                return (
+                    "Acceso denegado. No puedes registrar "
+                    "solicitudes para otra matrícula."
+                )
+
             response = register_request(
                 state["pending_student"],
-                state["pending_type"]
+                state["pending_type"],
+                identity=identity,
             )
+
             state["pending_type"] = None
             state["pending_student"] = None
             state["pending_confirmation"] = False

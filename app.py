@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from chat_router import route_message
 from dashboard import show_dashboard
+from security import Identity
 from core import (
     init_db,
     get_request,
@@ -15,9 +16,16 @@ from core import (
     register_document,
     list_documents,
     update_document_status,
+    demo_student_exists,
 )
 
+DEMO_ADMIN_USER = os.getenv("UNITRAMITE_DEMO_ADMIN_USER")
+DEMO_ADMIN_PASSWORD = os.getenv("UNITRAMITE_DEMO_ADMIN_PASSWORD")
+
 st.set_page_config(page_title="UniTramite AI | Atención a Estudiantes", page_icon="🎓", layout="wide")
+
+# Modo demostracion: solo para entornos locales con datos ficticios.
+DEMO_MODE = os.getenv("UNITRAMITE_DEMO_MODE", "false").lower() == "true"
 
 # En Streamlit Cloud (o .streamlit/secrets.toml) la URL de PostgreSQL llega como secreto
 if st.secrets.load_if_toml_exists() and "DATABASE_URL" in st.secrets:
@@ -48,6 +56,75 @@ with st.sidebar:
     st.divider()
     st.caption("Versión 0.1 · Canal web activo")
 
+# Secciones administrativas restringidas.
+# No existe todavía autenticación real en el prototipo.
+ADMIN_SECTIONS = {
+    "Panel de solicitudes",
+    "Registro de estudiantes",
+    "Gestión de documentos",
+}
+
+if "demo_admin_authenticated" not in st.session_state:
+    st.session_state.demo_admin_authenticated = False
+
+if section in ADMIN_SECTIONS:
+
+    # El acceso administrativo solo existe en modo demostracion.
+    if not DEMO_MODE:
+        st.warning(
+            "Las funciones administrativas estan deshabilitadas "
+            "fuera del entorno de demostracion."
+        )
+        st.stop()
+
+    # Mostrar login solamente cuando no exista sesion administrativa.
+    if not st.session_state.demo_admin_authenticated:
+        st.subheader("Acceso administrativo")
+        st.info(
+            "Inicio de sesion simulado para el prototipo academico. "
+            "Utiliza exclusivamente datos ficticios."
+        )
+
+        with st.form("demo_admin_login"):
+            username = st.text_input("Usuario")
+            password = st.text_input(
+                "Contrasena",
+                type="password",
+            )
+            submitted = st.form_submit_button("Iniciar sesion")
+
+        if submitted:
+            import hmac
+
+            credentials_configured = bool(
+                DEMO_ADMIN_USER and DEMO_ADMIN_PASSWORD
+            )
+
+            valid_credentials = (
+                credentials_configured
+                and hmac.compare_digest(username, DEMO_ADMIN_USER)
+                and hmac.compare_digest(password, DEMO_ADMIN_PASSWORD)
+            )
+
+            if valid_credentials:
+                st.session_state.demo_admin_authenticated = True
+                st.rerun()
+            else:
+                st.error("Usuario o contrasena incorrectos.")
+
+        st.stop()
+
+    # Identidad administrativa simulada.
+    # Solo se crea despues del login en modo demostracion.
+    admin_identity = Identity(role="admin")
+
+    # Sesion administrativa de demostracion activa.
+    st.success("Sesion administrativa de demostracion activa.")
+
+    if st.button("Cerrar sesion administrativa"):
+        st.session_state.demo_admin_authenticated = False
+        st.rerun()
+
 if section == "Conversar con el chatbot":
     st.subheader("Atención conversacional")
     st.write("Puedes solicitar un récord académico, una certificación de estudio o ayuda para consultar un ticket.")
@@ -62,28 +139,102 @@ if section == "Conversar con el chatbot":
     if "chat_state" not in st.session_state:
         st.session_state.chat_state = {"pending_type": None, "pending_student": None}
 
+    # Identidad simulada exclusiva del entorno de demostración.
+    if "demo_student_id" not in st.session_state:
+        st.session_state.demo_student_id = None
+
     prompt = st.chat_input("Escribe tu consulta...")
+
     if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        response = route_message(prompt, st.session_state.chat_state)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        import re
+
+        st.session_state.messages.append({
+            "role": "user",
+            "content": prompt,
+        })
+
+        if DEMO_MODE and st.session_state.demo_student_id is None:
+            match = re.search(r"\b\d{4}-\d{4}\b", prompt)
+
+            if match:
+                student_id = match.group(0)
+
+                if demo_student_exists(student_id):
+                    st.session_state.demo_student_id = student_id
+                    st.session_state.chat_state[
+                        "authenticated_identity"
+                    ] = Identity(
+                        student_id=student_id,
+                        role="student",
+                    )
+
+        response = route_message(
+            prompt,
+            st.session_state.chat_state,
+        )
+
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": response,
+        })
+
         st.rerun()
+
 
 elif section == "Consultar una solicitud":
     st.subheader("Seguimiento por ticket")
-    ticket = st.text_input("Identificador de ticket", placeholder="UT-000001").strip().upper()
-    if st.button("Consultar", type="primary"):
-        if not ticket:
-            st.info("Introduce un identificador.")
-        else:
-            req = get_request(ticket)
-            if req:
-                st.success(f"Estado: {req['status']}")
-                st.write(f"**Tipo:** {req['request_type']}")
-                st.write(f"**Fecha:** {req['created_at']}")
-                st.write(f"**Observación:** {req['notes']}")
+
+    if not DEMO_MODE or not st.session_state.get(
+        "demo_admin_authenticated", False
+    ):
+        st.info(
+            "La consulta directa de solicitudes requiere "
+            "iniciar sesion como administrador."
+        )
+        st.warning(
+            "Por proteccion de datos, la consulta publica "
+            "de tickets permanece deshabilitada."
+        )
+    else:
+        st.caption(
+            "Consulta administrativa de solicitudes "
+            "en modo demostracion."
+        )
+
+        ticket = st.text_input(
+            "Numero de ticket",
+            placeholder="UT-000011",
+        ).strip().upper()
+
+        if st.button("Consultar ticket"):
+            if not ticket:
+                st.warning("Introduce un numero de ticket.")
             else:
-                st.error("No se encontró el ticket en la base simulada.")
+                solicitud = get_request(
+                    ticket,
+                    identity=Identity(role="admin"),
+                )
+
+                if solicitud:
+                    st.success("Solicitud encontrada.")
+                    st.write(f"**Ticket:** {solicitud['ticket']}")
+                    st.write(
+                        f"**Matricula:** {solicitud['student_id']}"
+                    )
+                    st.write(
+                        f"**Tramite:** {solicitud['request_type']}"
+                    )
+                    st.write(
+                        f"**Estado:** {solicitud['status']}"
+                    )
+                    st.write(
+                        f"**Fecha de creacion:** "
+                        f"{solicitud['created_at']}"
+                    )
+                else:
+                    st.warning(
+                        "No se encontro el ticket solicitado."
+                    )
 
 
 
@@ -101,7 +252,7 @@ elif section == "Panel de solicitudes":
     if mensaje_actualizacion:
         st.success(mensaje_actualizacion)
 
-    rows = list_requests()
+    rows = list_requests(identity=admin_identity)
 
     if rows:
         import pandas as pd
@@ -219,7 +370,10 @@ elif section == "Panel de solicitudes":
                 key="ticket_seleccionado_panel",
             )
 
-            solicitud = get_request(ticket_seleccionado)
+            solicitud = get_request(
+                ticket_seleccionado,
+                identity=admin_identity,
+            )
 
             if solicitud:
                 st.write(f"**Ticket:** {solicitud['ticket']}")
@@ -282,6 +436,7 @@ elif section == "Panel de solicitudes":
                                 ticket_seleccionado,
                                 nuevo_estado,
                                 observacion,
+                                identity=admin_identity,
                             )
 
                             if resultado:
@@ -298,7 +453,10 @@ elif section == "Panel de solicitudes":
                 # Historial de seguimiento.
                 st.markdown("#### Historial de seguimiento")
 
-                historial = get_ticket_history(ticket_seleccionado)
+                historial = get_ticket_history(
+                    ticket_seleccionado,
+                    identity=admin_identity,
+                )
 
                 if historial:
                     df_historial = pd.DataFrame(historial)
@@ -345,12 +503,23 @@ elif section == "Registro de estudiantes":
         paz_y_salvo = col2.checkbox("Paz y salvo al día", value=True)
         notes = st.text_input("Nota (opcional)")
         if st.form_submit_button("Registrar estudiante", type="primary"):
-            error = register_student(student_id, full_name, matricula_activa, paz_y_salvo, notes)
+            error = register_student(
+                student_id,
+                full_name,
+                matricula_activa,
+                paz_y_salvo,
+                notes,
+                identity=admin_identity,
+            )
             if error:
                 st.error(error)
             else:
                 st.success(f"Estudiante {student_id.strip()} registrado. Ya puede solicitar trámites en el chatbot.")
-    st.dataframe(list_students(), use_container_width=True, hide_index=True)
+    st.dataframe(
+        list_students(identity=admin_identity),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 elif section == "Preguntas frecuentes":
     st.subheader("Preguntas frecuentes")
@@ -373,7 +542,9 @@ elif section == "Gestión de documentos":
     )
 
     # Obtener solicitudes existentes.
-    solicitudes = list_requests()
+    solicitudes = list_requests(
+    identity=Identity(role="admin")
+    )
 
     if not solicitudes:
         st.info(
@@ -394,7 +565,10 @@ elif section == "Gestión de documentos":
             key="ticket_documentos",
         )
 
-        solicitud = get_request(ticket)
+        solicitud = get_request(
+            ticket,
+            identity=admin_identity
+        )
 
         if solicitud:
             st.write(f"**Matrícula:** {solicitud['student_id']}")
@@ -436,6 +610,7 @@ elif section == "Gestión de documentos":
                             requirement_code=requisito,
                             file_name=nombre_documento,
                             observations=observaciones,
+                            identity=admin_identity,
                         )
 
                         if resultado:
@@ -463,7 +638,10 @@ elif section == "Gestión de documentos":
             st.divider()
             st.markdown("### Documentos registrados")
 
-            documentos = list_documents(ticket)
+            documentos = list_documents(
+                ticket,
+                identity=admin_identity,
+            )
 
             if documentos:
                 df_documentos = pd.DataFrame(documentos)
@@ -520,6 +698,7 @@ elif section == "Gestión de documentos":
                             document_id=documento["ID"],
                             new_status=nuevo_estado,
                             observations=observacion_revision,
+                            identity=admin_identity,
                         )
 
                         if resultado:
