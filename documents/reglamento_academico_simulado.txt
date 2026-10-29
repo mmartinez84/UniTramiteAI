@@ -1,0 +1,79 @@
+﻿# REGLAMENTO ACADEMICO SIMULADO
+# UniTramite AI - Documento ficticio para pruebas RAG
+
+AVISO IMPORTANTE
+Este documento es completamente ficticio.
+Se utiliza exclusivamente para demostrar el funcionamiento
+de UniTramite AI y no representa las normas de ninguna universidad real.
+
+ARTICULO 1. INSCRIPCION DE ASIGNATURAS
+
+Los estudiantes pueden solicitar la inscripcion de asignaturas
+durante los primeros 10 dias calendario del periodo academico.
+
+Requisitos:
+- Tener matricula estudiantil activa.
+- No presentar bloqueos administrativos.
+- Cumplir los prerrequisitos de las asignaturas.
+
+ARTICULO 2. RETIRO DE ASIGNATURAS
+
+El retiro de asignaturas puede solicitarse hasta el dia 30
+del periodo academico.
+
+Requisitos:
+- Tener la asignatura inscrita.
+- Presentar una solicitud de retiro.
+- Verificar que la solicitud se encuentre dentro del plazo.
+
+ARTICULO 3. CAMBIO DE CARRERA
+
+Los estudiantes pueden solicitar un cambio de carrera
+una vez completado su primer periodo academico.
+
+Requisitos:
+- Tener matricula activa.
+- Presentar una solicitud de cambio de carrera.
+- No tener solicitudes disciplinarias pendientes.
+
+El plazo de respuesta simulado es de 15 dias habiles.
+
+ARTICULO 4. CERTIFICACIONES ACADEMICAS
+
+Los estudiantes pueden solicitar certificaciones de estudios
+y constancias de inscripcion.
+
+Requisitos:
+- Tener matricula registrada.
+- Seleccionar el tipo de certificacion.
+- Confirmar los datos de la solicitud.
+
+El plazo de entrega simulado es de 5 dias habiles.
+
+ARTICULO 5. REVISION DE CALIFICACIONES
+
+La revision de una calificacion puede solicitarse
+dentro de los 7 dias calendario posteriores
+a su publicacion.
+
+Requisitos:
+- Identificar la asignatura.
+- Indicar la calificacion que desea revisar.
+- Presentar el motivo de la solicitud.
+
+ARTICULO 6. CONSULTA DE SOLICITUDES
+
+Cada solicitud registrada en UniTramite AI recibe
+un identificador unico de seguimiento.
+
+El estudiante puede consultar el estado de su solicitud
+utilizando su identificador y los mecanismos
+de validacion establecidos por el prototipo.
+
+ARTICULO 7. LIMITACIONES DEL PROTOTIPO
+
+Todos los procedimientos, requisitos y plazos descritos
+son simulados y se utilizan para fines academicos.
+
+UniTramite AI no sustituye los sistemas oficiales
+de ninguna institucion universitaria.
