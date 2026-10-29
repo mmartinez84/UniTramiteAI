@@ -19,6 +19,16 @@ from core import (
     demo_student_exists,
 )
 
+# Cargar configuracion del modo demostracion desde Streamlit Secrets.
+# Mantener compatibilidad con las variables locales de entorno.
+for secret_name in (
+    "UNITRAMITE_DEMO_MODE",
+    "UNITRAMITE_DEMO_ADMIN_USER",
+    "UNITRAMITE_DEMO_ADMIN_PASSWORD",
+):
+    if secret_name in st.secrets:
+        os.environ[secret_name] = str(st.secrets[secret_name])
+
 DEMO_ADMIN_USER = os.getenv("UNITRAMITE_DEMO_ADMIN_USER")
 DEMO_ADMIN_PASSWORD = os.getenv("UNITRAMITE_DEMO_ADMIN_PASSWORD")
 
