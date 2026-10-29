@@ -1,0 +1,83 @@
+﻿# PREGUNTAS FRECUENTES ACADEMICAS
+# UniTramite AI - Base de conocimiento ficticia
+
+AVISO IMPORTANTE
+Este documento es ficticio y se utiliza exclusivamente
+para pruebas academicas de UniTramite AI.
+No representa politicas de ninguna universidad real.
+
+PREGUNTA 1. ¿Cuando puedo inscribir asignaturas?
+RESPUESTA:
+Durante los primeros 10 dias calendario del periodo academico.
+Debes tener matricula activa, no presentar bloqueos
+administrativos y cumplir los prerrequisitos.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 1.
+
+PREGUNTA 2. ¿Hasta cuando puedo retirar una asignatura?
+RESPUESTA:
+Puedes solicitar el retiro hasta el dia 30 del periodo
+academico, siempre que la asignatura este inscrita.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 2.
+
+PREGUNTA 3. ¿Que necesito para cambiar de carrera?
+RESPUESTA:
+Debes haber completado el primer periodo academico,
+tener matricula activa, presentar la solicitud y no
+tener solicitudes disciplinarias pendientes.
+El plazo de respuesta simulado es de 15 dias habiles.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 3.
+
+PREGUNTA 4. ¿Cuanto tarda una certificacion academica?
+RESPUESTA:
+El plazo de entrega simulado es de 5 dias habiles.
+Debes tener matricula registrada, seleccionar el tipo
+de certificacion y confirmar los datos de la solicitud.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 4.
+
+PREGUNTA 5. ¿Como solicito una revision de calificacion?
+RESPUESTA:
+Puedes solicitarla dentro de los 7 dias calendario
+posteriores a la publicacion de la calificacion.
+Debes identificar la asignatura, indicar la calificacion
+y presentar el motivo de la revision.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 5.
+
+PREGUNTA 6. ¿Como consulto el estado de mi solicitud?
+RESPUESTA:
+Utiliza el identificador unico de seguimiento asignado
+por UniTramite AI y completa la validacion correspondiente.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 6.
+
+PREGUNTA 7. ¿UniTramite AI realiza tramites oficiales?
+RESPUESTA:
+No. UniTramite AI es un prototipo academico.
+Sus procedimientos, requisitos y plazos son simulados.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 7.
+
+PREGUNTA 8. ¿Puedo retirar una asignatura el dia 40?
+RESPUESTA:
+No. Segun el reglamento simulado, el plazo finaliza
+el dia 30 del periodo academico.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 2.
+
+PREGUNTA 9. ¿Puedo solicitar una revision 15 dias despues?
+RESPUESTA:
+No. El plazo simulado es de 7 dias calendario
+posteriores a la publicacion de la calificacion.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 5.
+
+PREGUNTA 10. ¿Cuanto cuesta una certificacion?
+RESPUESTA:
+El reglamento simulado no establece un costo.
+No debe inventarse un importe.
+
+REFERENCIA: Reglamento Academico Simulado, Articulo 4.

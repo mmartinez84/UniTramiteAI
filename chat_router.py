@@ -60,7 +60,11 @@ def route_message(prompt, state):
         if response:
             return response
 
-        return faq_answer(prompt)
+        return (
+            "En este momento no puedo completar la consulta "
+            "documental. Inténtalo nuevamente más tarde. "
+            "Los procedimientos de UniTramite AI son simulados."
+        )
 
     # Operaciones y mensajes restantes.
     return handle_message(prompt, state)
